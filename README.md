@@ -1,6 +1,10 @@
 # MikumariSecnd-Ex
 Example design of the MIKUMARI-link secondary side
 
+FW magic: 0x390B
+
+Latest version: 2.0
+
 ## Board IOs
 ### LED
 
