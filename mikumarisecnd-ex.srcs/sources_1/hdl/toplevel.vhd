@@ -142,6 +142,7 @@ architecture Behavioral of toplevel is
   signal watchdog_error       : std_logic;
 
   signal mod_clk              : std_logic;
+  signal gmod_clk             : std_logic;
 
   signal cbt_tap_value        : std_logic_vector(4 downto 0);
 
@@ -165,6 +166,7 @@ architecture Behavioral of toplevel is
   signal recv_terminated    : std_logic;
   signal pulse_out          : std_logic;
   signal pulse_type_out     : std_logic_vector(2 downto 0);
+  signal pulse_reg_out      : std_logic_vector(3 downto 0);
 
   attribute mark_debug of miku_tx_ack  : signal is "true";
   attribute mark_debug of miku_data_tx  : signal is "true";
@@ -179,6 +181,7 @@ architecture Behavioral of toplevel is
   attribute mark_debug of recv_terminated  : signal is "true";
   attribute mark_debug of pulse_out  : signal is "true";
   attribute mark_debug of pulse_type_out  : signal is "true";
+  attribute mark_debug of pulse_reg_out  : signal is "true";
 
   -- C6C ----------------------------------------------------------------------------------
   signal c6c_reset              : std_logic;
@@ -364,6 +367,19 @@ architecture Behavioral of toplevel is
         );
   end component;
 
+  component mmcm_cdcm
+    port
+     (-- Clock in ports
+      -- Clock out ports
+      clk_fast          : out    std_logic;
+      clk_slow          : out    std_logic;
+      -- Status and control signals
+      reset             : in     std_logic;
+      locked            : out    std_logic;
+      clk_in1           : in     std_logic
+     );
+  end component;
+
   signal clk_fast, clk_slow   : std_logic;
   signal mmcm_cdcm_locked     : std_logic;
   signal mmcm_cdcm_reset      : std_logic;
@@ -380,10 +396,12 @@ architecture Behavioral of toplevel is
     generic map(kNumDelay => 128)
     port map(clk_sys, USR_RSTB, delayed_usr_rstb);
 
-  clk_miku_locked <= CDCE_LOCK;
+--  clk_miku_locked <= CDCE_LOCK;
+  clk_miku_locked <= mmcm_cdcm_locked;
   clk_locked      <= clk_sys_locked and clk_miku_locked;
 
-  c6c_reset       <= (not clk_sys_locked) or (not delayed_usr_rstb);
+--  c6c_reset       <= (not clk_sys_locked) or (not delayed_usr_rstb);
+  c6c_reset       <= '1';
   mmcm_cdcm_reset <= (not delayed_usr_rstb);
 
   system_reset    <= (not clk_miku_locked) or (not USR_RSTB);
@@ -447,8 +465,8 @@ architecture Behavioral of toplevel is
       enDebugCBT       => FALSE,
 
       -- MIKUMARI generic --------------------------------------------------------
-      -- Scrambler --
       enScrambler      => TRUE,
+      kHighPrecision   => TRUE,
       -- DEBUG --
       enDebugMikumari  => FALSE
     )
@@ -462,7 +480,6 @@ architecture Behavioral of toplevel is
       clkIdctrl     => clk_gbe,
       initIn        => power_on_init,
       tapValueIn    => cbt_tap_value,
-      tapValueOut   => open,
 
       TXP           => MIKUMARI_TXP,
       TXN           => MIKUMARI_TXN,
@@ -477,6 +494,11 @@ architecture Behavioral of toplevel is
       pattErr       => pattern_error,
       watchDogErr   => watchdog_error,
 
+      tapValueOut   => open,
+      bitslipNum    => open,
+      serdesOffset  => open,
+      firstBitPatt  => open,
+
       -- Mikumari ports -------------------------------------------------------
       linkUp        => mikumari_link_up,
 
@@ -489,6 +511,7 @@ architecture Behavioral of toplevel is
 
       pulseIn       => '0',
       pulseTypeTx   => "010",
+      pulseRegTx    => "0000",
       busyPulseTx   => open,
 
       -- RX port --
@@ -501,7 +524,8 @@ architecture Behavioral of toplevel is
       recvTermnd  => recv_terminated,
 
       pulseOut    => pulse_out,
-      pulseTypeRx => pulse_type_out
+      pulseTypeRx => pulse_type_out,
+      pulseRegRx  => pulse_reg_out
 
     );
 
@@ -550,7 +574,7 @@ architecture Behavioral of toplevel is
     port map(
       rst                 => system_reset,
       clk                 => clk_slow,
-      refClkIn            => mod_clk,
+      refClkIn            => clk_spi,
 
       chipReset           => c6c_reset,
       clkIndep            => clk_sys,
@@ -909,20 +933,39 @@ architecture Behavioral of toplevel is
       clk_in1_n       => BASE_CLKN
       );
 
+  u_BUFG :  BUFG
+    port map (
+      O => gmod_clk, -- 1-bit output: Clock output
+      I => mod_clk  -- 1-bit input: Clock input
+    );
+
+  --
+  u_MMCM_CDCM : mmcm_cdcm
+    port map (
+      -- Clock out ports
+      clk_fast  => clk_fast,
+      clk_slow  => clk_slow,
+      -- Status and control signals
+      reset     => mmcm_cdcm_reset,
+      locked    => mmcm_cdcm_locked,
+      -- Clock in ports
+      clk_in1   => gmod_clk
+   );
+
   -- CDCE clocks --
 --  pll_is_locked   <= mmcm_cdcm_locked and CDCE_LOCK;
 
-  u_BUFG_Slow : BUFG
-    port map (
-      O => clk_slow, -- 1-bit output: Clock output
-      I => c6c_slow  -- 1-bit input: Clock input
-    );
-
-  u_BUFG_Fast : BUFG
-    port map (
-      O => clk_fast, -- 1-bit output: Clock output
-      I => c6c_fast  -- 1-bit input: Clock input
-    );
+--  u_BUFG_Slow : BUFG
+--    port map (
+--      O => clk_slow, -- 1-bit output: Clock output
+--      I => c6c_slow  -- 1-bit input: Clock input
+--    );
+--
+--  u_BUFG_Fast : BUFG
+--    port map (
+--      O => clk_fast, -- 1-bit output: Clock output
+--      I => c6c_fast  -- 1-bit input: Clock input
+--    );
 
   u_IBUFDS_SLOW_inst : IBUFDS
     generic map (
