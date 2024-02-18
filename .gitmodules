@@ -1,6 +1,6 @@
-[submodule "mikumarisecnd-ex.srcs/sources_1/mikumari"]
-	path = mikumarisecnd-ex.srcs/sources_1/mikumari
-	url = https://github.com/RyotaroHonda/mikumari.git
-[submodule "mikumarisecnd-ex.srcs/sources_1/sitcp"]
-	path = mikumarisecnd-ex.srcs/sources_1/sitcp
+[submodule "hdl/bbt-sitcp-core"]
+	path = hdl/bbt-sitcp-core
 	url = https://github.com/BeeBeansTechnologies/SiTCP_Netlist_for_Kintex7.git
+[submodule "hdl/mikumari"]
+	path = hdl/mikumari
+	url = https://github.com/RyotaroHonda/mikumari.git
