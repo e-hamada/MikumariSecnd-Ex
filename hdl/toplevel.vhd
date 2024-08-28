@@ -7,12 +7,10 @@ library UNISIM;
 use UNISIM.VComponents.all;
 
 library mylib;
-use mylib.defToplevel.all;
 use mylib.defBCT.all;
 use mylib.defBusAddressMap.all;
 use mylib.defSiTCP.all;
 use mylib.defRBCP.all;
-use mylib.defMiiRstTimer.all;
 
 entity toplevel is
   Port (
@@ -29,10 +27,10 @@ entity toplevel is
 -- GTX ------------------------------------------------------------------
     GTX_REFCLK_P        : in std_logic;
     GTX_REFCLK_N        : in std_logic;
-    GTX_TX_P            : out std_logic_vector(kNumGtx downto 1);
-    GTX_RX_P            : in  std_logic_vector(kNumGtx downto 1);
-    GTX_TX_N            : out std_logic_vector(kNumGtx downto 1);
-    GTX_RX_N            : in  std_logic_vector(kNumGtx downto 1);
+    GTX_TX_P            : out std_logic_vector(1 downto 1);
+    GTX_RX_P            : in  std_logic_vector(1 downto 1);
+    GTX_TX_N            : out std_logic_vector(1 downto 1);
+    GTX_RX_N            : in  std_logic_vector(1 downto 1);
 
 -- SPI flash ------------------------------------------------------------
     MOSI                : out std_logic;
@@ -94,7 +92,14 @@ architecture Behavioral of toplevel is
   attribute mark_debug : string;
 
   -- System --------------------------------------------------------------------------------
+  -- AMANEQ specification
+  constant kNumLED      : integer:= 4;
+  constant kNumBitDIP   : integer:= 4;
+  constant kNumNIM      : integer:= 2;
+  constant kNumGtx      : integer:= 1;
+
   signal sitcp_reset  : std_logic;
+  signal raw_pwr_on_reset : std_logic;
   signal pwr_on_reset : std_logic;
   signal system_reset : std_logic;
   signal user_reset   : std_logic;
@@ -106,6 +111,8 @@ architecture Behavioral of toplevel is
   signal rst_from_bus : std_logic;
 
   signal delayed_usr_rstb : std_logic;
+
+  signal module_ready     : std_logic;
 
   -- DIP -----------------------------------------------------------------------------------
   signal dip_sw       : std_logic_vector(DIP'range);
@@ -120,8 +127,8 @@ architecture Behavioral of toplevel is
   constant kDummy     : regLeaf := (Index => 0);
 
   -- MIKUMARI -----------------------------------------------------------------------------
-  constant  kPcbVersion : string:= "GN-2006-4";
-  --constant  kPcbVersion : string:= "GN-2006-1";
+  --constant  kPcbVersion : string:= "GN-2006-4";
+  constant  kPcbVersion : string:= "GN-2006-1";
 
   function GetMikuIoStd(version: string) return string is
   begin
@@ -135,7 +142,6 @@ architecture Behavioral of toplevel is
   signal power_on_init        : std_logic;
 
   signal reset_shiftreg       : std_logic_vector(7 downto 0);
-  signal sync_reset           : std_logic;
 
   signal cbt_lane_up          : std_logic;
   signal pattern_error        : std_logic;
@@ -304,6 +310,10 @@ architecture Behavioral of toplevel is
   end component;
 
   -- SFP transceiver -----------------------------------------------------------------------
+  constant kPcsPmaLinkStatus  : integer:= 0;
+  signal pcs_pma_status       : std_logic_vector(15 downto 0);
+
+  constant kWidthPhyAddr  : integer:= 5;
   constant kMiiPhyad      : std_logic_vector(kWidthPhyAddr-1 downto 0):= "00000";
   signal mii_init_mdc, mii_init_mdio : std_logic;
 
@@ -404,13 +414,15 @@ architecture Behavioral of toplevel is
   c6c_reset       <= '1';
   mmcm_cdcm_reset <= (not delayed_usr_rstb);
 
-  system_reset    <= (not clk_miku_locked) or (not USR_RSTB);
-  pwr_on_reset    <= (not clk_sys_locked) or (not USR_RSTB);
+  system_reset      <= (not clk_miku_locked) or (not USR_RSTB);
+  raw_pwr_on_reset  <= (not clk_sys_locked); -- or (not USR_RSTB);
+  u_KeepPwrOnRst : entity mylib.RstDelayTimer
+    port map(raw_pwr_on_reset, X"0FFFFFFF", clk_sys, module_ready, pwr_on_reset);
 
-  user_reset      <= system_reset or rst_from_bus or emergency_reset(0);
-  bct_reset       <= system_reset or emergency_reset(0);
+  user_reset      <= system_reset or rst_from_bus;
+  bct_reset       <= system_reset;
 
-  NIM_OUT(1)  <= c6c_slow when(DIP(kClkOut.Index) = '1') else '0';
+  NIM_OUT(1)  <= clk_slow when(DIP(kClkOut.Index) = '1') else '0';
   NIM_OUT(2)  <= mod_clk  when(DIP(kClkOut.Index) = '1') else pulse_out;
 
   dip_sw(1)   <= DIP(1);
@@ -418,27 +430,11 @@ architecture Behavioral of toplevel is
   dip_sw(3)   <= DIP(3);
   dip_sw(4)   <= DIP(4);
 
-  LED         <= mikumari_link_up & tcp_isActive(0) & clk_sys_locked & CDCE_LOCK;
+  LED         <= (clk_miku_locked and module_ready) & mikumari_link_up & clk_sys_locked & '0';
 
   -- MIKUMARI --------------------------------------------------------------------------
-  cbt_tap_value <= "01010" when(DIP(4 downto 3) = "00") else
-                   "00000" when(DIP(4 downto 3) = "01") else
-                   "10000" when(DIP(4 downto 3) = "10") else "01010";
-
-  u_KeepInit : process(system_reset, clk_slow)
-    variable counter   : integer:= 0;
-  begin
-    if(system_reset = '1') then
-      power_on_init   <= '1';
-      counter         := 16#0FFFFFFF#;
-    elsif(clk_slow'event and clk_slow = '1') then
-      if(counter = 0) then
-        power_on_init   <= '0';
-      else
-        counter   := counter -1;
-      end if;
-    end if;
-  end process;
+  u_KeepInit : entity mylib.RstDelayTimer
+    port map(system_reset, X"0FFFFFFF", clk_slow, open, power_on_init );
 
   u_Miku_Inst : entity mylib.MikumariBlock
     generic map(
@@ -466,7 +462,7 @@ architecture Behavioral of toplevel is
 
       -- MIKUMARI generic --------------------------------------------------------
       enScrambler      => TRUE,
-      kHighPrecision   => TRUE,
+      kHighPrecision   => FALSE,
       -- DEBUG --
       enDebugMikumari  => FALSE
     )
@@ -479,7 +475,7 @@ architecture Behavioral of toplevel is
       clkIndep      => clk_gbe,
       clkIdctrl     => clk_gbe,
       initIn        => power_on_init,
-      tapValueIn    => cbt_tap_value,
+      tapValueIn    => "00000",
 
       TXP           => MIKUMARI_TXP,
       TXN           => MIKUMARI_TXN,
@@ -553,17 +549,6 @@ architecture Behavioral of toplevel is
         end if;
       end if;
     end process;
-
-  -- Reset sequence --
-  sync_reset    <= reset_shiftreg(7);
-  u_sync_reset : process(system_reset, clk_slow)
-  begin
-    if(system_reset = '1') then
-      reset_shiftreg  <= (others => '1');
-    elsif(clk_slow'event and clk_slow = '1') then
-      reset_shiftreg  <= reset_shiftreg(6 downto 0) & '0';
-    end if;
-  end process;
 
 
   -- C6C -------------------------------------------------------------------------------
@@ -695,7 +680,8 @@ architecture Behavioral of toplevel is
       );
 
   -- SiTCP Inst ------------------------------------------------------------------------
-  sitcp_reset     <= pwr_on_reset;
+  u_SiTCPRst : entity mylib.ResetGen
+    port map(pwr_on_reset or (not pcs_pma_status(kPcsPmaLinkStatus)), clk_sys, sitcp_reset);
 
   gen_SiTCP : for i in 0 to kNumGtx-1 generate
 
@@ -804,7 +790,7 @@ architecture Behavioral of toplevel is
   -- SFP transceiver -------------------------------------------------------------------
   u_MiiRstTimer_Inst : entity mylib.MiiRstTimer
     port map(
-      rst         => pwr_on_reset,
+      rst         => emergency_reset(0),
       clk         => clk_sys,
       rstMiiOut   => mii_reset
     );
